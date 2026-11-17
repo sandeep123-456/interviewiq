@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+/* IMPORTANT: yahi tumhara design system hai.
+   Yahan naam do to Tailwind apne aap classes bana deta hai:
+   --color-signal  ->  bg-signal, text-signal, border-signal
+   --font-display  ->  font-display
+   Poore app ka look badalna ho to sirf ye hex values badlo. */
+@theme {
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-sans: "Figtree", system-ui, sans-serif;
+
+  --color-ink: #101a33; /* text aur dark surfaces */
+  --color-chalk: #f3f5fa; /* page background */
+  --color-paper: #ffffff; /* cards */
+  --color-line: #dde2ee; /* borders */
+  --color-muted: #5b6683; /* secondary text */
+  --color-signal: #2f5bff; /* primary button, links */
+  --color-marigold: #ffb020; /* credits aur highlights */
+  --color-mint: #1fbf8f; /* achha score */
+  --color-coral: #ff5c5c; /* kamzor score */
+}
+
+body {
+  background: var(--color-chalk);
+  color: var(--color-ink);
+}
+
+/* Keyboard se navigate karne wale ko focus dikhna chahiye */
+:focus-visible {
+  outline: 2px solid var(--color-signal);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Hero panel ke 2 hi animations hain: waveform (listening) aur score bars (ek baar fill) */
+@keyframes wave {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+@keyframes fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+.wave-bar {
+  animation: wave 1.1s ease-in-out infinite;
+}
+.bar-fill {
+  transform-origin: left;
+  animation: fill 1.2s cubic-bezier(0.2, 0.8, 0.2, 1) 0.5s both;
+}
+
+/* Jisne device me "reduce motion" on kiya hai uske liye animation band */
+@media (prefers-reduced-motion: reduce) {
+  .wave-bar,
+  .bar-fill {
+    animation: none;
+  }
+}
