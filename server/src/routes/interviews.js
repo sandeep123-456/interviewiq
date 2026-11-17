@@ -120,6 +120,32 @@ router.post('/', async (req, res, next) => {
   }
 });
 
+// GET /api/interviews  ->  mere saare interviews ki list (naya pehle)
+router.get('/', async (req, res, next) => {
+  try {
+    const interviews = await prisma.interview.findMany({
+      where: { userId: req.user.userId }, // sirf apne interviews
+      orderBy: { startedAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        role: true,
+        type: true,
+        difficulty: true,
+        mode: true,
+        status: true,
+        totalQuestions: true,
+        overallScore: true,
+        startedAt: true,
+        completedAt: true,
+      },
+    });
+    res.json({ interviews });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/interviews/:id  ->  ek interview, uske questions aur answers ke saath
 router.get('/:id', async (req, res, next) => {
   try {

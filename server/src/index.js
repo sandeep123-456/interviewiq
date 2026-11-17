@@ -6,6 +6,7 @@ const cors = require('cors');
 
 const authRoutes = require('./routes/auth');
 const interviewRoutes = require('./routes/interviews');
+const statsRoutes = require('./routes/stats');
 
 const app = express();
 
@@ -22,7 +23,7 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRoutes);
 // Aage yahin interview, resume, payment wagairah ke routes judenge
 app.use('/api/interviews', interviewRoutes);
-
+app.use('/api/stats', statsRoutes);
 // Koi unknown route
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
 
