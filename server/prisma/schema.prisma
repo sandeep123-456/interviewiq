@@ -1,0 +1,278 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// IMPORTANT DESIGN IDEAS (interview me ye bolna):
+//
+// 1. CREDITS = LEDGER. Credits overwrite nahi hote. Har change ek entry hai
+//    (CreditTransaction): +10 purchase, -1 interview. User.creditBalance sirf
+//    fast-read ke liye cache hai, dono ek hi DB transaction me update honge.
+//
+// 2. DOUBLE-SPEND ROKNA. Credit kaatne ka query aisa hoga:
+//      updateMany({ where: { id, creditBalance: { gte: 1 } }, data: { decrement: 1 } })
+//    Ye ek atomic step hai. 2 requests ek saath aayein to bhi balance negative nahi hoga.
+//
+// 3. PAYMENT IDEMPOTENCY. CreditTransaction me @@unique([reason, refId]) hai.
+//    Razorpay payment 2 baar verify ho jaye to bhi credits ek hi baar milenge.
+//
+// 4. ADAPTIVE DIFFICULTY. Interview.currentLevel (1-10) har answer ke score ke
+//    baad upar/neeche hota hai, aur agla question usi level ka banta hai.
+//
+// 5. IDs UUID hain, taaki guess na ho sakein aur URLs me safe rahein.
+// ============================================================
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum InterviewType {
+  TECHNICAL
+  HR
+  DSA
+  MIXED
+}
+
+enum InterviewMode {
+  TEXT
+  VOICE
+}
+
+enum InterviewStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum QuestionKind {
+  CONCEPT
+  FOLLOW_UP
+  CODING
+}
+
+enum AnswerSource {
+  TEXT
+  VOICE
+}
+
+enum Verdict {
+  PENDING
+  ACCEPTED
+  WRONG_ANSWER
+  TIME_LIMIT
+  RUNTIME_ERROR
+  COMPILE_ERROR
+}
+
+enum PaymentStatus {
+  CREATED
+  PAID
+  FAILED
+}
+
+enum CreditReason {
+  SIGNUP_BONUS
+  PURCHASE
+  INTERVIEW_START
+  REFUND
+  ADMIN_GRANT
+}
+
+model User {
+  id            String   @id @default(uuid())
+  name          String
+  email         String   @unique
+  passwordHash  String // password kabhi plain save nahi hota
+  role          Role     @default(USER)
+  targetRole    String? // e.g. "Backend Developer"
+  creditBalance Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  resumes     Resume[]
+  interviews  Interview[]
+  topicStats  TopicStat[]
+  submissions CodeSubmission[]
+  payments    Payment[]
+  creditTxns  CreditTransaction[]
+}
+
+model Resume {
+  id         String   @id @default(uuid())
+  userId     String
+  fileName   String
+  rawText    String   @db.Text // PDF se nikala hua poora text
+  parsedData Json // LLM ka structured output: skills, projects, experience
+  createdAt  DateTime @default(now())
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interviews Interview[]
+
+  @@index([userId])
+}
+
+model Interview {
+  id             String          @id @default(uuid())
+  userId         String
+  resumeId       String? // resume-based interview me set hota hai
+  type           InterviewType
+  role           String
+  difficulty     Difficulty
+  mode           InterviewMode   @default(TEXT)
+  status         InterviewStatus @default(IN_PROGRESS)
+  totalQuestions Int
+  currentLevel   Int             @default(3) // adaptive difficulty, 1 se 10
+  overallScore   Float?
+  report         Json? // final report (strengths, weak topics, tips)
+  startedAt      DateTime        @default(now())
+  completedAt    DateTime?
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resume      Resume?          @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  questions   Question[]
+  submissions CodeSubmission[]
+
+  @@index([userId, startedAt])
+}
+
+model Question {
+  id          String       @id @default(uuid())
+  interviewId String
+  orderIndex  Int // interview me question ka number
+  kind        QuestionKind @default(CONCEPT)
+  text        String       @db.Text
+  topic       String // e.g. "React", "DBMS", "OOPs"
+  level       Int          @default(3) // is question ka difficulty level
+  parentId    String? // follow-up hai to kis question ka
+  problemId   String? // CODING question hai to kaun si problem
+  createdAt   DateTime     @default(now())
+
+  interview   Interview        @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  parent      Question?        @relation("FollowUps", fields: [parentId], references: [id], onDelete: SetNull)
+  followUps   Question[]       @relation("FollowUps")
+  problem     CodingProblem?   @relation(fields: [problemId], references: [id])
+  answer      Answer?
+  submissions CodeSubmission[]
+
+  @@unique([interviewId, orderIndex])
+  @@index([interviewId])
+}
+
+model Answer {
+  id           String       @id @default(uuid())
+  questionId   String       @unique
+  text         String       @db.Text
+  source       AnswerSource @default(TEXT) // bolke diya ya likh ke
+  score        Float? // 0 se 10
+  feedback     Json? // {strengths, improvements, idealAnswer}
+  timeTakenSec Int?
+  createdAt    DateTime     @default(now())
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+}
+
+// Weak topic tracking. Average = totalScore / attempts.
+model TopicStat {
+  userId     String
+  topic      String
+  attempts   Int      @default(0)
+  totalScore Float    @default(0)
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, topic])
+}
+
+model CodingProblem {
+  id          String     @id @default(uuid())
+  slug        String     @unique
+  title       String
+  description String     @db.Text
+  difficulty  Difficulty
+  topic       String
+  starterCode Json // {"java": "...", "python": "...", "javascript": "..."}
+  isActive    Boolean    @default(true)
+
+  testCases   TestCase[]
+  questions   Question[]
+  submissions CodeSubmission[]
+}
+
+model TestCase {
+  id             String  @id @default(uuid())
+  problemId      String
+  input          String  @db.Text
+  expectedOutput String  @db.Text
+  isHidden       Boolean @default(true) // false = sample test, user ko dikhta hai
+
+  problem CodingProblem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@index([problemId])
+}
+
+model CodeSubmission {
+  id          String   @id @default(uuid())
+  userId      String
+  problemId   String
+  interviewId String?
+  questionId  String?
+  language    String
+  code        String   @db.Text
+  verdict     Verdict  @default(PENDING)
+  passedCount Int      @default(0)
+  totalCount  Int      @default(0)
+  runtimeMs   Int?
+  aiReview    Json? // complexity, edge cases, suggestions
+  createdAt   DateTime @default(now())
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem   CodingProblem @relation(fields: [problemId], references: [id])
+  interview Interview?    @relation(fields: [interviewId], references: [id], onDelete: SetNull)
+  question  Question?     @relation(fields: [questionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+}
+
+// Razorpay order ki entry. Order banate waqt CREATED, verify hone par PAID.
+model Payment {
+  id                String        @id @default(uuid())
+  userId            String
+  razorpayOrderId   String        @unique
+  razorpayPaymentId String?       @unique
+  amountPaise       Int // paisa paise me (1 rupee = 100 paise), float me paisa kabhi nahi
+  creditsToAdd      Int
+  status            PaymentStatus @default(CREATED)
+  createdAt         DateTime      @default(now())
+  paidAt            DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Append-only credit ledger. refId = paymentId / interviewId / userId (signup).
+model CreditTransaction {
+  id        String       @id @default(uuid())
+  userId    String
+  amount    Int // +3 signup, +10 purchase, -1 interview
+  reason    CreditReason
+  refId     String?
+  createdAt DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reason, refId]) // ek hi event pe credits 2 baar nahi mil sakte
+  @@index([userId, createdAt])
+}
