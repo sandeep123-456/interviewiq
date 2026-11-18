@@ -1,12 +1,11 @@
 import { Link } from 'react-router-dom';
-import { Coins, User } from 'lucide-react';
-
-// TODO (jab login frontend banega): ye real user se aayega.
-// Abhi sirf demo ke liye hardcoded hai. Logged-out wala look dekhna ho to
-// is line ko `const user = null;` kar do.
-const user = { name: 'Sandeep', credits: 3 };
+import { Coins } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 export default function Navbar() {
+  // Ab hardcoded user nahi, asli logged-in user AuthContext se aata hai
+  const { user, loading, logout } = useAuth();
+
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-chalk/85 backdrop-blur">
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
@@ -23,7 +22,10 @@ export default function Navbar() {
           <a href="/#pricing" className="hover:text-ink">Pricing</a>
         </div>
 
-        {user ? (
+        {/* loading: token check ho raha hai, tab tak right side khali (flicker nahi hota) */}
+        {loading ? (
+          <div className="h-9 w-24" />
+        ) : user ? (
           <div className="flex items-center gap-3">
             {/* Credit chip: har interview shuru hone par 1 credit kat-ta hai */}
             <Link
@@ -32,15 +34,26 @@ export default function Navbar() {
               className="flex items-center gap-1.5 rounded-full bg-marigold/20 px-3 py-1.5 text-sm font-semibold hover:bg-marigold/35"
             >
               <Coins size={16} className="text-marigold" />
-              {user.credits}
+              {user.creditBalance}
             </Link>
             <Link
-              to="/profile"
-              aria-label="Profile"
-              className="grid h-9 w-9 place-items-center rounded-full bg-ink text-white"
+              to="/history"
+              className="hidden text-sm font-medium text-muted hover:text-ink sm:block"
             >
-              <User size={16} />
+              History
             </Link>
+            <button
+              onClick={logout}
+              className="rounded-lg border border-line px-3 py-1.5 text-sm font-medium hover:border-ink"
+            >
+              Log out
+            </button>
+            <span
+              title={user.name}
+              className="grid h-9 w-9 place-items-center rounded-full bg-ink text-sm font-semibold text-white"
+            >
+              {user.name.charAt(0).toUpperCase()}
+            </span>
           </div>
         ) : (
           <div className="flex items-center gap-2">

@@ -1,6 +1,10 @@
 import { Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
+import ProtectedRoute from './components/ProtectedRoute';
 import Home from './pages/Home';
+import Login from './pages/Login';
+import NewInterview from './pages/NewInterview';
+import Interview from './pages/Interview';
 
 // Jo pages abhi nahi bane unke liye temporary page, taaki buttons 404 na dein.
 function Placeholder({ title }) {
@@ -19,11 +23,32 @@ export default function App() {
       <main>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Placeholder title="Log in" />} />
-          <Route path="/interview/new" element={<Placeholder title="Start an interview" />} />
-          <Route path="/history" element={<Placeholder title="Past interviews" />} />
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/interview/new"
+            element={
+              <ProtectedRoute>
+                <NewInterview />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/interview/:id"
+            element={
+              <ProtectedRoute>
+                <Interview />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/history"
+            element={
+              <ProtectedRoute>
+                <Placeholder title="Past interviews" />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/credits" element={<Placeholder title="Buy credits" />} />
-          <Route path="/profile" element={<Placeholder title="Profile" />} />
         </Routes>
       </main>
       <footer className="border-t border-line py-8 text-center text-sm text-muted">
