@@ -5,6 +5,7 @@ import Home from './pages/Home';
 import Login from './pages/Login';
 import NewInterview from './pages/NewInterview';
 import Interview from './pages/Interview';
+import History from './pages/History';
 
 // Jo pages abhi nahi bane unke liye temporary page, taaki buttons 404 na dein.
 function Placeholder({ title }) {
@@ -44,7 +45,7 @@ export default function App() {
             path="/history"
             element={
               <ProtectedRoute>
-                <Placeholder title="Past interviews" />
+                <History />
               </ProtectedRoute>
             }
           />
