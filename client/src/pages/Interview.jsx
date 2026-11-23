@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import FeedbackCard from '../components/FeedbackCard';
+import CameraPreview from '../components/CameraPreview';
+import DeviceGate from '../components/DeviceGate';
+import { canListen, canSpeak, useListen, useSpeak } from '../lib/useSpeech';
 
 // Interview khatam hone ke baad ka summary (har question ka score aur feedback)
 function Summary({ interview }) {
@@ -70,6 +73,37 @@ export default function Interview() {
   const [result, setResult] = useState(null); // answer bhejne ke baad AI ka jawab
   const startedAt = useRef(Date.now()); // har question ka time naapne ke liye
 
+  // Camera stream (DeviceGate se milti hai). Ye hooks saare early return se PEHLE rehne chahiye.
+  const [stream, setStream] = useState(null);
+  const streamRef = useRef(null);
+  const [usedVoice, setUsedVoice] = useState(false); // is answer me mic use hua?
+
+  const { listening, interim, error: micError, start, stop } = useListen((finalText) => {
+    setUsedVoice(true);
+    setText((prev) => (prev ? prev + ' ' : '') + finalText);
+  });
+  const { speaking, speak, cancel } = useSpeak();
+
+  function handleDevicesReady(s) {
+    streamRef.current = s;
+    setStream(s);
+  }
+
+  // Camera beech me band ho gaya (unplug ya browser se off) to gate wapas aayega
+  useEffect(() => {
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    const onEnd = () => {
+      streamRef.current = null;
+      setStream(null);
+    };
+    track?.addEventListener('ended', onEnd);
+    return () => track?.removeEventListener('ended', onEnd);
+  }, [stream]);
+
+  // Page chhodte hi camera band (light bujh jaye)
+  useEffect(() => () => streamRef.current?.getTracks().forEach((t) => t.stop()), []);
+
   const load = useCallback(async () => {
     try {
       const data = await api(`/interviews/${id}`);
@@ -87,6 +121,15 @@ export default function Interview() {
   }, [load]);
 
   if (loading) {
+      // Interview poora ho gaya (summary dikh rahi hai): camera band kar do, light bujh jaye
+  const finished = interview?.status === 'COMPLETED' && !result;
+  useEffect(() => {
+    if (finished && streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      setStream(null);
+    }
+  }, [finished]);
     return <div className="px-4 py-24 text-center text-muted">Loading...</div>;
   }
   if (loadError || !interview) {
@@ -113,10 +156,17 @@ export default function Interview() {
     return <div className="px-4 py-24 text-center text-muted">No question to answer.</div>;
   }
 
+  // Camera + mic ke bina interview nahi chalega
+  if (!stream) {
+    return <DeviceGate onReady={handleDevicesReady} />;
+  }
+
   const done = answeredCount + (result ? 1 : 0);
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (listening) stop();
+    cancel();
     setError('');
     setBusy(true);
     try {
@@ -125,7 +175,7 @@ export default function Interview() {
         body: {
           questionId: current.id,
           text: text.trim(),
-          source: 'TEXT',
+          source: usedVoice ? 'VOICE' : 'TEXT',
           timeTakenSec: Math.min(3600, Math.round((Date.now() - startedAt.current) / 1000)),
         },
       });
@@ -142,12 +192,15 @@ export default function Interview() {
   async function handleNext() {
     setResult(null);
     setText('');
+    setUsedVoice(false);
     startedAt.current = Date.now();
     await load(); // naya question (ya complete summary) server se lao
   }
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-12">
+      <CameraPreview stream={stream} />
+
       {/* Upar: kitne question ho gaye aur abhi ka level */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="font-medium">
@@ -195,13 +248,38 @@ export default function Interview() {
             )}
           </div>
 
-          <h1 className="mt-4 font-display text-2xl font-bold leading-snug tracking-tight">
-            {current.text}
-          </h1>
+          <div className="mt-4 flex items-start justify-between gap-4">
+            <h1 className="font-display text-2xl font-bold leading-snug tracking-tight">
+              {current.text}
+            </h1>
+            {canSpeak && (
+              <button
+                type="button"
+                onClick={() => (speaking ? cancel() : speak(current.text))}
+                className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-sm font-semibold transition hover:border-ink"
+              >
+                {speaking ? 'Stop' : 'Read aloud'}
+              </button>
+            )}
+          </div>
 
-          <label htmlFor="answer" className="mt-8 mb-2 block text-sm font-medium">
-            Your answer
-          </label>
+          <div className="mt-8 mb-2 flex items-center justify-between">
+            <label htmlFor="answer" className="text-sm font-medium">
+              Your answer
+            </label>
+            {canListen && (
+              <button
+                type="button"
+                onClick={listening ? stop : start}
+                disabled={busy}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                  listening ? 'bg-coral text-white' : 'border border-line hover:border-ink'
+                }`}
+              >
+                {listening ? 'Stop recording' : 'Speak your answer'}
+              </button>
+            )}
+          </div>
           <textarea
             id="answer"
             rows={9}
@@ -213,6 +291,13 @@ export default function Interview() {
             className="w-full resize-y rounded-2xl border border-line bg-paper p-4 leading-relaxed outline-none transition focus:border-signal"
           />
           <p className="mt-1 text-right text-xs text-muted">{text.length} / 4000</p>
+
+          {listening && (
+            <p role="status" className="mt-2 text-sm text-muted">
+              Listening... {interim}
+            </p>
+          )}
+          {micError && <p className="mt-2 text-sm text-red-700">{micError}</p>}
 
           {error && (
             <p role="alert" className="mt-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
