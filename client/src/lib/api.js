@@ -24,18 +24,21 @@ export function setToken(token) {
 }
 
 // Use: const data = await api('/auth/login', { method: 'POST', body: { email, password } })
+// File bhejni ho to body me FormData do (resume upload).
 export async function api(path, { method = 'GET', body } = {}) {
   const token = getToken();
+  const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
 
   let res;
   try {
     res = await fetch(`${BASE_URL}/api${path}`, {
       method,
       headers: {
-        'Content-Type': 'application/json',
+        // FormData me Content-Type browser khud lagata hai (boundary ke saath). Hum mat lagao.
+        ...(isForm ? {} : { 'Content-Type': 'application/json' }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: body ? JSON.stringify(body) : undefined,
+      body: body ? (isForm ? body : JSON.stringify(body)) : undefined,
     });
   } catch {
     // Network error: server band hai ya internet nahi

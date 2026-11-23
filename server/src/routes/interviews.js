@@ -6,6 +6,7 @@ const { requireAuth } = require('../middleware/auth');
 const { generateQuestions, generateFollowUp } = require('../services/questions');
 const { evaluateAnswer } = require('../services/evaluate');
 const { nextLevel } = require('../lib/adaptive');
+const { resumeContext } = require('../services/resume');
 
 const router = express.Router();
 
@@ -21,6 +22,7 @@ const startSchema = z.object({
   difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).default('MEDIUM'),
   mode: z.enum(['TEXT', 'VOICE']).default('TEXT'),
   totalQuestions: z.number().int().min(3).max(15).default(5),
+  resumeId: z.string().uuid().optional(),
 });
 
 // POST /api/interviews  ->  naya interview shuru karo (1 credit lagta hai)
@@ -30,7 +32,7 @@ router.post('/', async (req, res, next) => {
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.issues[0].message });
     }
-    const { role, type, difficulty, mode, totalQuestions } = parsed.data;
+    const { role, type, difficulty, mode, totalQuestions, resumeId } = parsed.data;
     const userId = req.user.userId;
 
     // STEP A: sasta pre-check. Credit nahi hai to AI ko bulane ka kharcha mat karo.
@@ -43,6 +45,14 @@ router.post('/', async (req, res, next) => {
       return res.status(402).json({ error: 'Not enough credits. Buy credits to start an interview.' });
     }
 
+    // Resume chuna hai to wo isi user ka hona chahiye, phir uska summary AI ko do
+    let context = '';
+    if (resumeId) {
+      const resume = await prisma.resume.findFirst({ where: { id: resumeId, userId } });
+      if (!resume) return res.status(404).json({ error: 'Resume not found' });
+      context = resumeContext(resume.parsedData);
+    }
+
     // STEP B: AI se pehla question. Ye DB transaction ke BAHAR hai, kyunki AI 10-30 second
     // le sakta hai, aur itni der transaction kholke rakhna database ko block kar deta hai.
     // Fayda: AI fail hua to credit kata hi nahi, refund ka jhanjhat nahi.
@@ -51,6 +61,7 @@ router.post('/', async (req, res, next) => {
       role: `${role} (${type} round)`,
       level,
       count: 1,
+      context,
     });
 
     // STEP C: ek transaction me credit katna + interview banana + ledger entry.
@@ -72,6 +83,7 @@ router.post('/', async (req, res, next) => {
       const interview = await tx.interview.create({
         data: {
           userId,
+          resumeId: resumeId ?? null,
           role,
           type,
           difficulty,
@@ -164,6 +176,7 @@ router.get('/:id', async (req, res, next) => {
     next(err);
   }
 });
+
 const answerSchema = z.object({
   questionId: z.string().uuid(),
   text: z.string().trim().min(1, 'Answer cannot be empty').max(4000, 'Answer is too long'),
@@ -211,6 +224,13 @@ router.post('/:id/answers', async (req, res, next) => {
     const newLevel = nextLevel(interview.currentLevel, evaluation.score);
     const roleForAI = `${interview.role} (${interview.type} round)`;
 
+    // Resume-based interview hai to agle question ke liye bhi resume ka summary do
+    let context = '';
+    if (interview.resumeId) {
+      const resume = await prisma.resume.findUnique({ where: { id: interview.resumeId } });
+      context = resume ? resumeContext(resume.parsedData) : '';
+    }
+
     // STEP B: agar interview baaki hai to agla question taiyar karo
     let nextData = null;
     if (!isLast) {
@@ -238,6 +258,7 @@ router.post('/:id/answers', async (req, res, next) => {
           level: newLevel,
           count: 1,
           avoid: interview.questions.map((x) => x.text),
+          context,
         });
         nextData = { kind: 'CONCEPT', text: q.text, topic: q.topic, level: newLevel };
       }
@@ -326,4 +347,5 @@ router.post('/:id/answers', async (req, res, next) => {
     next(err);
   }
 });
+
 module.exports = router;
