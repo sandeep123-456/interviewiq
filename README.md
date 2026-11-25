@@ -1,68 +1,57 @@
 # InterviewIQ
 
-An AI mock-interview platform. Pick a role, answer questions, and get a score and feedback on every answer. The difficulty adapts to how well you are doing.
+AI mock interview platform. Pick a role, answer questions by typing or speaking, and get scored feedback on every answer. Upload your resume and the questions come from your own projects.
 
-## Features
+**Live demo:** https://interviewiq-wine-pi.vercel.app
 
-- Signup and login with JWT and bcrypt
-- Credit system: 3 free credits on signup, 1 credit per interview, stored as an append-only ledger
-- AI-generated questions, answer scoring and follow-up questions through OpenRouter
-- Adaptive difficulty: the level (1 to 10) of the next question depends on the last score
-- Interview history and per-topic statistics, used to find weak topics
-- Landing page built with React and Tailwind CSS
+The backend runs on a free server that sleeps when idle, so the first request can take up to a minute.
+
+## What it does
+
+- **AI interviews.** An LLM writes the questions, scores each answer (correctness, clarity, depth) and asks follow-ups when an answer is thin.
+- **Adaptive difficulty.** The next question gets harder or easier based on your score.
+- **Voice mode.** Answer by speaking (speech to text, editable before you submit). Questions can be read aloud. Camera and microphone are required to start, like a real video interview. Nothing is recorded or uploaded.
+- **Resume-based questions.** Upload a PDF resume. The LLM extracts skills and projects, and the interview asks about them.
+- **Progress tracking.** Per-topic averages show your weakest areas. Every past interview and its feedback is saved.
+- **Credit system.** Each interview costs one credit. Credits are an append-only ledger with an idempotency key, and deductions are atomic.
 
 ## Tech stack
 
-| Layer | Tools |
-|---|---|
-| Frontend | React, Vite, Tailwind CSS, React Router |
-| Backend | Node.js, Express, Zod |
-| Database | PostgreSQL, Prisma 5 |
-| AI | OpenRouter (free models) |
-| Auth | JWT, bcrypt |
+React, Vite, Tailwind CSS | Node.js, Express | PostgreSQL (Neon), Prisma | OpenRouter (LLM) | JWT, Zod | Vercel, Render
 
-## Design decisions
+## Engineering notes
 
-- **Credits are a ledger.** Every change is a new row in `CreditTransaction` (for example `+3` on signup, `-1` per interview). The balance on the user is a cache that is updated in the same transaction.
-- **No double spending.** A credit is deducted with one atomic query (`balance >= 1` then decrement), so two parallel requests cannot spend the same credit.
-- **LLM output is never trusted.** Every reply is parsed and validated with a Zod schema, and retried up to three times if it is malformed.
-- **AI calls stay outside database transactions.** A slow model call must not hold a transaction open. If the AI call fails, no credit is deducted.
-- **Prompt injection.** The candidate's answer is treated as data. The grading prompt tells the model to ignore instructions written inside an answer.
-- **Ownership checks.** Interviews are always looked up by id and user id together, so one user cannot read another user's data.
+- **Credits cannot be double-spent.** The balance check and decrement are one atomic query inside a transaction, so two parallel requests cannot both spend the last credit. Every change is also written to a ledger.
+- **A failed AI call costs nothing.** AI calls run outside the database transaction, and the credit is deducted only after the first question exists.
+- **LLM output is validated.** Responses are parsed as JSON, checked with Zod and retried, so a malformed reply never reaches the user.
+- **Candidate text is treated as untrusted.** Answers and resumes are passed to the model as data, with instructions not to follow anything written inside them (prompt injection mitigation).
+- **Ownership checks on every query.** Interviews and resumes are always looked up by id and user id, so one user cannot read another user's data.
 
 ## Run locally
 
-You need Node.js 18 or newer, a PostgreSQL database (for example a free one on Neon), and an OpenRouter API key.
-
 ```bash
-# Backend
+git clone https://github.com/sandeep123-456/interviewiq.git
+cd interviewiq
+
+# backend
 cd server
 npm install
-cp .env.example .env        # then fill in the values
-npx prisma db push          # creates the tables
-npm run dev                 # http://localhost:4000
+cp .env.example .env     # fill in the values
+npx prisma db push
+npm run dev
 
-# Frontend (in another terminal)
+# frontend (new terminal)
 cd client
 npm install
-npm run dev                 # http://localhost:5173
+npm run dev
 ```
 
-Prisma is pinned to version 5.22 on purpose.
+Backend environment variables (see `server/.env.example`): `DATABASE_URL`, `JWT_SECRET`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `CLIENT_URL`.
+Frontend: `VITE_API_URL` (defaults to `http://localhost:4000`).
 
-## API
+## Project structure
 
-All routes except register, login and health need the header `Authorization: Bearer <token>`.
-
-| Method | Route | Purpose |
-|---|---|---|
-| POST | `/api/auth/register` | Create an account (3 free credits) |
-| POST | `/api/auth/login` | Log in |
-| GET | `/api/auth/me` | Current user |
-| POST | `/api/interviews` | Start an interview (costs 1 credit) |
-| GET | `/api/interviews` | List my interviews |
-| GET | `/api/interviews/:id` | One interview with questions and answers |
-| POST | `/api/interviews/:id/answers` | Submit an answer, get a score and the next question |
-| GET | `/api/stats/summary` | Completed interviews, average and best score |
-| GET | `/api/stats/topics` | Average score per topic, weakest first |
-| GET | `/api/health` | Health check |
+```
+client/   React app (pages, components, voice and camera hooks)
+server/   Express API, Prisma schema, AI services (questions, evaluation, resume parsing)
+```
